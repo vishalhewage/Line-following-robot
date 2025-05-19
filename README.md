@@ -1,121 +1,82 @@
-#include <SoftwareSerial.h>
-#include <TinyGPSPlus.h>
+// IR sensor pins
+const int leftSensorPin = 34;   // GPIO34 (analog-capable input-only pin)
+const int rightSensorPin = 35;  // GPIO35 (analog-capable input-only pin)
 
-// === Pins ===
-const int trigPin = 8;
-const int echoPin = 9;
-const int ldrPin = A0;
-const int waterSensorPin = 6;
-const int panicButtonPin = 2;
-const int buzzerPin = 5;
-
-// === Serial Interfaces ===
-SoftwareSerial gpsSerial(4, 3);    // GPS: RX, TX
-SoftwareSerial gsmSerial(10, 11);  // GSM: RX, TX
-TinyGPSPlus gps;
-
-// === Button Logic Variables ===
-unsigned long lastPressTime = 0;
-int pressCount = 0;
-bool smsSent = false;
-bool buzzerActive = false;
+// Motor control pins
+const int leftMotor1 = 18;
+const int leftMotor2 = 19;
+const int rightMotor1 = 23;
+const int rightMotor2 = 22;
 
 void setup() {
-  Serial.begin(9600);
-  gpsSerial.begin(9600);
-  gsmSerial.begin(9600);
+  Serial.begin(115200);
 
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
-  pinMode(waterSensorPin, INPUT);
-  pinMode(panicButtonPin, INPUT_PULLUP);
-  pinMode(buzzerPin, OUTPUT);
+  // Set sensor pins as input
+  pinMode(leftSensorPin, INPUT);
+  pinMode(rightSensorPin, INPUT);
 
-  // Initialize GSM
-  delay(10000); // allow GSM to register on network
-  gsmSerial.println("AT");
-  delay(500);
-  gsmSerial.println("AT+CMGF=1");
-  delay(500);
-  gsmSerial.println("AT+CNMI=1,2,0,0,0");
-  delay(500);
+  // Set motor pins as output
+  pinMode(leftMotor1, OUTPUT);
+  pinMode(leftMotor2, OUTPUT);
+  pinMode(rightMotor1, OUTPUT);
+  pinMode(rightMotor2, OUTPUT);
 }
 
 void loop() {
-  // === Sensor Checks ===
-  long duration;
-  digitalWrite(trigPin, LOW); delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH); delayMicroseconds(10); digitalWrite(trigPin, LOW);
-  duration = pulseIn(echoPin, HIGH);
-  int distance = duration * 0.034 / 2;
+  int leftSensor = digitalRead(leftSensorPin);
+  int rightSensor = digitalRead(rightSensorPin);
 
-  int lightValue = analogRead(ldrPin);
-  int waterStatus = digitalRead(waterSensorPin);
-  bool panicPressed = digitalRead(panicButtonPin) == LOW;
+  Serial.print("Left: ");
+  Serial.print(leftSensor);
+  Serial.print(" | Right: ");
+  Serial.println(rightSensor);
 
-  // === Buzzer Logic ===
-  if ((distance < 50 || lightValue < 200 || waterStatus == LOW) && !panicPressed) {
-    digitalWrite(buzzerPin, HIGH);
-    buzzerActive = true;
+  if (leftSensor == LOW && rightSensor == LOW) {
+    // Both sensors on the line → Go forward
+    moveForward();
+  }
+  else if (leftSensor == LOW && rightSensor == HIGH) {
+    // Left on line, right off → Turn left
+    turnLeft();
+  }
+  else if (leftSensor == HIGH && rightSensor == LOW) {
+    // Right on line, left off → Turn right
+    turnRight();
+  }
+  else {
+    // Both sensors off line → Stop or Search
+    stopMotors();
   }
 
-  // Stop buzzer if long press (held for > 2 sec)
-  if (panicPressed) {
-    static unsigned long buttonPressStart = 0;
-    if (buttonPressStart == 0) {
-      buttonPressStart = millis();
-    } else if (millis() - buttonPressStart >= 2000) {
-      digitalWrite(buzzerPin, LOW);
-      buzzerActive = false;
-    }
-  } else {
-    buttonPressStart = 0; // reset if button released
-    if (!buzzerActive) digitalWrite(buzzerPin, LOW);
-  }
-
-  // === Double Press Logic for SMS ===
-  static bool lastButtonState = HIGH;
-  bool buttonState = digitalRead(panicButtonPin);
-
-  if (lastButtonState == HIGH && buttonState == LOW) {
-    unsigned long currentTime = millis();
-    if (currentTime - lastPressTime <= 1000) {
-      pressCount++;
-    } else {
-      pressCount = 1;
-    }
-    lastPressTime = currentTime;
-  }
-  lastButtonState = buttonState;
-
-  if (pressCount >= 2 && !smsSent) {
-    sendEmergencySMS();
-    smsSent = true;
-  }
-
-  // Reset after release
-  if (digitalRead(panicButtonPin) == HIGH && smsSent) {
-    delay(1000);
-    pressCount = 0;
-    smsSent = false;
-  }
-
-  // Update GPS
-  while (gpsSerial.available()) {
-    gps.encode(gpsSerial.read());
-  }
+  delay(10);
 }
 
-void sendEmergencySMS() {
-  String lat = gps.location.isValid() ? String(gps.location.lat(), 6) : "0.000000";
-  String lon = gps.location.isValid() ? String(gps.location.lng(), 6) : "0.000000";
-  String message = "Emergency! Help needed.\nLocation: https://maps.google.com/?q=" + lat + "," + lon;
-
-  gsmSerial.println("AT+CMGF=1");
-  delay(1000);
-  gsmSerial.println("AT+CMGS=\"+94713313777\"");
-  delay(1000);
-  gsmSerial.print(message);
-  gsmSerial.write(26); // Ctrl+Z
-  delay(5000);
+// Motor control functions
+void moveForward() {
+  digitalWrite(leftMotor1, HIGH);
+  digitalWrite(leftMotor2, LOW);
+  digitalWrite(rightMotor1, HIGH);
+  digitalWrite(rightMotor2, LOW);
 }
+
+void turnLeft() {
+  digitalWrite(leftMotor1, LOW);
+  digitalWrite(leftMotor2, LOW);
+  digitalWrite(rightMotor1, HIGH);
+  digitalWrite(rightMotor2, LOW);
+}
+
+void turnRight() {
+  digitalWrite(leftMotor1, HIGH);
+  digitalWrite(leftMotor2, LOW);
+  digitalWrite(rightMotor1, LOW);
+  digitalWrite(rightMotor2, LOW);
+}
+
+void stopMotors() {
+  digitalWrite(leftMotor1, LOW);
+  digitalWrite(leftMotor2, LOW);
+  digitalWrite(rightMotor1, LOW);
+  digitalWrite(rightMotor2, LOW);
+}
+
